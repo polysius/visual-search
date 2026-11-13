@@ -8,7 +8,7 @@ from visual_search.index import GalleryIndex
 from visual_search.metrics import average_precision, recall_at_k
 
 DEFAULT_KS = (1, 5, 10)
-QUERY_CHUNK = 1024  # queries ranked at once; bounds the (chunk x gallery) matrices
+QUERY_CHUNK = 128  # queries ranked at once; 128 x 60k gallery keeps each matrix near 60 MB
 
 
 @dataclass
