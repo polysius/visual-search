@@ -14,14 +14,20 @@ from visual_search.crop import STRATEGIES, BoxCropper
 from visual_search.datasets import LOADERS, SOP_ROOT
 from visual_search.embedder import CLIP_MODEL, ImageEmbedder
 from visual_search.evaluate import evaluate_retrieval
+from visual_search.onnx_embedder import OnnxEmbedder
 
 
 def main() -> None:
     args = parse_args()
     if args.crop is not None and args.dataset == "inshop":
         raise SystemExit("--crop works with the SOP datasets only (sop, sop-val)")
+    if args.onnx is not None and args.adapter is not None:
+        raise SystemExit("--onnx already contains the merged adapter; do not pass --adapter")
     split = LOADERS[args.dataset](args.data_dir, limit=args.limit)
-    embedder = ImageEmbedder(args.model, device=args.device, adapter_path=args.adapter)
+    if args.onnx is not None:
+        embedder = OnnxEmbedder(args.onnx)
+    else:
+        embedder = ImageEmbedder(args.model, device=args.device, adapter_path=args.adapter)
 
     crop = make_cropper(args)
 
@@ -48,8 +54,9 @@ def main() -> None:
         "dataset": args.dataset,
         "model": args.model,
         "adapter": str(args.adapter) if args.adapter else None,
+        "onnx": str(args.onnx) if args.onnx else None,
         "crop": crop_settings(args),
-        "device": args.device,
+        "device": "cpu (onnxruntime)" if args.onnx else args.device,
         "limit": args.limit,
         "gallery_size": len(split.gallery_paths),
         "embed_seconds": round(embed_seconds, 1),
@@ -98,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="LoRA adapter folder saved by visual_search.train",
+    )
+    parser.add_argument(
+        "--onnx",
+        type=Path,
+        default=None,
+        help="embed with an ONNX model made by visual_search.export (CPU); replaces --model/--adapter",
     )
     parser.add_argument(
         "--crop",

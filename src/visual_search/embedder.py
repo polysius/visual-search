@@ -5,6 +5,7 @@ projections are plain `nn.Linear` layers, which LoRA (M2) and ONNX export (M4)
 both handle well, so baseline, fine-tuned and exported models share this wrapper.
 """
 
+import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,6 +14,18 @@ from PIL import Image
 
 CLIP_MODEL = "openai/clip-vit-base-patch32"
 DINOV2_MODEL = "facebook/dinov2-small"
+
+
+def adapter_fingerprint(adapter_path: Path | None) -> str | None:
+    """A hash of a LoRA adapter's weights, or None when there is no adapter.
+
+    Exported models and gallery indexes record it, so the server can refuse to search a
+    gallery that was embedded with different weights.
+    """
+    if adapter_path is None:
+        return None
+    weights = Path(adapter_path) / "adapter_model.safetensors"
+    return hashlib.sha256(weights.read_bytes()).hexdigest()
 
 
 def is_clip_model(model_name: str) -> bool:
@@ -29,7 +42,35 @@ def pooled_embedding(model, is_clip: bool, pixel_values):
     return outputs.image_embeds if is_clip else outputs.last_hidden_state[:, 0]
 
 
-class ImageEmbedder:
+class PathEncoder:
+    """Embeds image files in batches, for any class that provides `encode_images`."""
+
+    def encode_images(self, images: list[Image.Image]) -> np.ndarray:
+        raise NotImplementedError
+
+    def encode_paths(
+        self,
+        paths: list[Path],
+        batch_size: int = 64,
+        num_workers: int = 4,
+        crop: Callable[[Path, Image.Image], Image.Image] | None = None,
+    ) -> np.ndarray:
+        """Embed image files. Decoding runs in worker processes while the model runs.
+
+        `crop(path, image)` can return a cropped image, such as `BoxCropper`; it runs in the workers.
+        """
+        from torch.utils.data import DataLoader  # not needed by the serving path
+
+        loader = DataLoader(
+            _ImageFiles(paths, crop),
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_fn=list,  # keep PIL images; the embedder does the resizing
+        )
+        return np.concatenate([self.encode_images(batch) for batch in loader])
+
+
+class ImageEmbedder(PathEncoder):
     def __init__(
         self,
         model_name: str = CLIP_MODEL,
@@ -59,26 +100,6 @@ class ImageEmbedder:
         with self._torch.no_grad():
             vectors = pooled_embedding(self.model, self.is_clip, inputs["pixel_values"])
         return vectors.cpu().numpy().astype(np.float32)
-
-    def encode_paths(
-        self,
-        paths: list[Path],
-        batch_size: int = 64,
-        num_workers: int = 4,
-        crop: Callable[[Path, Image.Image], Image.Image] | None = None,
-    ) -> np.ndarray:
-        """Embed image files. Decoding runs in worker processes while the model runs.
-
-        `crop(path, image)` can return a cropped image, such as `BoxCropper`; it runs in the workers.
-        """
-        loader = self._torch.utils.data.DataLoader(
-            _ImageFiles(paths, crop),
-            batch_size=batch_size,
-            num_workers=num_workers,
-            collate_fn=list,  # keep PIL images; the processor does the resizing
-        )
-        batches = [self.encode_images(batch) for batch in loader]
-        return np.concatenate(batches)
 
 
 class _ImageFiles:

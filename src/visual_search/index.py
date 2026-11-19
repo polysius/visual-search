@@ -1,5 +1,7 @@
 """Exact inner-product search over L2-normalised embeddings, backed by FAISS."""
 
+from pathlib import Path
+
 import numpy as np
 
 
@@ -17,6 +19,19 @@ class GalleryIndex:
         vectors = np.ascontiguousarray(l2_normalize(gallery_embeddings), dtype=np.float32)
         self._index = faiss.IndexFlatIP(vectors.shape[1])
         self._index.add(vectors)
+
+    def save(self, path: Path) -> None:
+        import faiss
+
+        faiss.write_index(self._index, str(path))
+
+    @classmethod
+    def load(cls, path: Path) -> "GalleryIndex":
+        import faiss
+
+        index = cls.__new__(cls)  # skip __init__: the vectors are already in the saved index
+        index._index = faiss.read_index(str(path))
+        return index
 
     @property
     def size(self) -> int:
