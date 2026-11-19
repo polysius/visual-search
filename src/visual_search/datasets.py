@@ -14,8 +14,9 @@ from pathlib import Path
 
 import numpy as np
 
-SOP_TEST_LIST = "Stanford_Online_Products/Ebay_test.txt"
-SOP_TRAIN_LIST = "Stanford_Online_Products/Ebay_train.txt"
+SOP_ROOT = "Stanford_Online_Products"
+SOP_TEST_LIST = f"{SOP_ROOT}/Ebay_test.txt"
+SOP_TRAIN_LIST = f"{SOP_ROOT}/Ebay_train.txt"
 INSHOP_PARTITION_FILE = "Eval/list_eval_partition.txt"
 
 
@@ -33,7 +34,7 @@ def _read_sop_list(data_dir: Path, list_file: str) -> tuple[list[Path], np.ndarr
     # Header: image_id class_id super_class_id path
     for line in (data_dir / list_file).read_text().splitlines()[1:]:
         _, class_id, _, relative_path = line.split()
-        paths.append(data_dir / "Stanford_Online_Products" / relative_path)
+        paths.append(data_dir / SOP_ROOT / relative_path)
         labels.append(int(class_id))
     return paths, np.asarray(labels)
 
@@ -88,6 +89,20 @@ def load_sop_training(
     )
 
 
+def load_sop_validation(data_dir: Path, limit: int | None = None) -> RetrievalSplit:
+    """The classes held out of training in M2, used to choose settings without the test split.
+
+    It uses the same class count and seed as `visual_search.train`, so a model trained
+    there has never seen these classes. `limit` keeps the first N images.
+    """
+    validation = load_sop_training(data_dir).validation
+    if limit is None:
+        return validation
+    return _self_retrieval_split(
+        validation.gallery_paths[:limit], validation.gallery_labels[:limit]
+    )
+
+
 def load_inshop(data_dir: Path, limit: int | None = None) -> RetrievalSplit:
     """DeepFashion In-Shop standard split. `limit` keeps the first N queries and galleries."""
     data_dir = Path(data_dir)
@@ -111,4 +126,4 @@ def load_inshop(data_dir: Path, limit: int | None = None) -> RetrievalSplit:
     )
 
 
-LOADERS = {"sop": load_sop, "inshop": load_inshop}
+LOADERS = {"sop": load_sop, "sop-val": load_sop_validation, "inshop": load_inshop}

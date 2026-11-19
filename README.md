@@ -14,7 +14,7 @@ query image -> [YOLO crop] -> vision encoder (CLIP or DINOv2, LoRA fine-tuned) -
 | --- | --- | --- |
 | M1 | Baseline retrieval: pretrained embeddings, FAISS, recall@1/5/10 and mAP | Done. Baseline numbers for CLIP and DINOv2 small are in `RESULTS.md` |
 | M2 | LoRA contrastive fine-tuning | Done for CLIP: recall@1 0.604 to 0.831 on the SOP test split, see `RESULTS.md`. DINOv2 not yet fine-tuned |
-| M3 | YOLO crop before embedding | Not started |
+| M3 | YOLO crop before embedding | Built and measured. No crop setting beat full images on recall@1 or mAP on SOP validation, so it is off by default, see `RESULTS.md` |
 | M4 | ONNX export, FastAPI upload endpoint, latency table | Not started |
 
 ## Dataset
@@ -51,6 +51,16 @@ python -m visual_search.train --data-dir ~/vs-data --device cuda --out-dir artif
 python -m visual_search.run_baseline --dataset sop --data-dir ~/vs-data --device cuda \
     --adapter artifacts/m2_clip/best --out artifacts/m2_clip_test.json
 ```
+
+Crop each image to its detected object before embedding. This needs the `detect` extra (`pip install -e .[detect]`). The detector saves its boxes once, and `run_baseline` reads them:
+
+```
+python -m visual_search.detect --data-dir ~/vs-data --split validation --out artifacts/boxes_val.json
+python -m visual_search.run_baseline --dataset sop-val --data-dir ~/vs-data --device cuda \
+    --crop artifacts/boxes_val.json --crop-strategy top
+```
+
+`scripts/sweep_crop.ps1` compares several crop settings on the validation classes. Cropping is off unless `--crop` is given.
 
 Training holds out 1,000 whole classes of the SOP train split for validation and writes `best`, `last` and `log.json` to the output folder. The test split is only used by the second command.
 
