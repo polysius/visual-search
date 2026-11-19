@@ -13,7 +13,7 @@ query image -> [YOLO crop] -> vision encoder (CLIP or DINOv2, LoRA fine-tuned) -
 | Milestone | Scope | State |
 | --- | --- | --- |
 | M1 | Baseline retrieval: pretrained embeddings, FAISS, recall@1/5/10 and mAP | Done. Baseline numbers for CLIP and DINOv2 small are in `RESULTS.md` |
-| M2 | LoRA contrastive fine-tuning | Not started |
+| M2 | LoRA contrastive fine-tuning | Done for CLIP: recall@1 0.604 to 0.831 on the SOP test split, see `RESULTS.md`. DINOv2 not yet fine-tuned |
 | M3 | YOLO crop before embedding | Not started |
 | M4 | ONNX export, FastAPI upload endpoint, latency table | Not started |
 
@@ -44,6 +44,16 @@ pytest
 
 `--limit N` embeds only the first N images, for a quick smoke run.
 
+Fine-tune with LoRA, then score the best epoch on the test split:
+
+```
+python -m visual_search.train --data-dir ~/vs-data --device cuda --out-dir artifacts/m2_clip
+python -m visual_search.run_baseline --dataset sop --data-dir ~/vs-data --device cuda \
+    --adapter artifacts/m2_clip/best --out artifacts/m2_clip_test.json
+```
+
+Training holds out 1,000 whole classes of the SOP train split for validation and writes `best`, `last` and `log.json` to the output folder. The test split is only used by the second command.
+
 The model wrapper uses Hugging Face transformers rather than open_clip. Its attention projections are plain linear layers, which LoRA and ONNX export both support, and the baseline, fine-tuned and exported models share one code path.
 
-GPU work for M2 is planned for Kaggle.
+M2 trained locally on a 6 GB RTX 3060 in about 17 minutes, so Kaggle is not needed for CLIP.

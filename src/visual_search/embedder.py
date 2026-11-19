@@ -14,26 +14,49 @@ CLIP_MODEL = "openai/clip-vit-base-patch32"
 DINOV2_MODEL = "facebook/dinov2-small"
 
 
+def is_clip_model(model_name: str) -> bool:
+    return "clip" in model_name.lower()
+
+
+def pooled_embedding(model, is_clip: bool, pixel_values):
+    """Run the encoder and return one vector per image (a torch tensor).
+
+    Shared by embedding and training so both use the same output head.
+    CLIP: the projected image embedding. DINOv2: the CLS token of the last layer.
+    """
+    outputs = model(pixel_values=pixel_values)
+    return outputs.image_embeds if is_clip else outputs.last_hidden_state[:, 0]
+
+
 class ImageEmbedder:
-    def __init__(self, model_name: str = CLIP_MODEL, device: str = "cpu"):
+    def __init__(
+        self,
+        model_name: str = CLIP_MODEL,
+        device: str = "cpu",
+        adapter_path: Path | None = None,
+    ):
+        """`adapter_path` is a LoRA adapter saved by `visual_search.train`; it is merged into the base."""
         import torch
         from transformers import AutoImageProcessor, AutoModel, CLIPVisionModelWithProjection
 
         self.model_name = model_name
         self.device = device
-        self.is_clip = "clip" in model_name.lower()
+        self.is_clip = is_clip_model(model_name)
         self.processor = AutoImageProcessor.from_pretrained(model_name)
         model_class = CLIPVisionModelWithProjection if self.is_clip else AutoModel
-        self.model = model_class.from_pretrained(model_name).to(device).eval()
+        self.model = model_class.from_pretrained(model_name)
+        if adapter_path is not None:
+            from peft import PeftModel
+
+            self.model = PeftModel.from_pretrained(self.model, adapter_path).merge_and_unload()
+        self.model = self.model.to(device).eval()
         self._torch = torch
 
     def encode_images(self, images: list[Image.Image]) -> np.ndarray:
         """Embed a batch of PIL images; returns a (batch, dim) float32 array."""
         inputs = self.processor(images=images, return_tensors="pt").to(self.device)
         with self._torch.no_grad():
-            outputs = self.model(pixel_values=inputs["pixel_values"])
-        # CLIP: projected image embedding. DINOv2: the CLS token of the last layer.
-        vectors = outputs.image_embeds if self.is_clip else outputs.last_hidden_state[:, 0]
+            vectors = pooled_embedding(self.model, self.is_clip, inputs["pixel_values"])
         return vectors.cpu().numpy().astype(np.float32)
 
     def encode_paths(

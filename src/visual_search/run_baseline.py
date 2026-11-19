@@ -18,7 +18,7 @@ from visual_search.evaluate import evaluate_retrieval
 def main() -> None:
     args = parse_args()
     split = LOADERS[args.dataset](args.data_dir, limit=args.limit)
-    embedder = ImageEmbedder(args.model, device=args.device)
+    embedder = ImageEmbedder(args.model, device=args.device, adapter_path=args.adapter)
 
     started = time.perf_counter()
     gallery_embeddings = embedder.encode_paths(split.gallery_paths, args.batch_size, args.workers)
@@ -38,6 +38,7 @@ def main() -> None:
     result = {
         "dataset": args.dataset,
         "model": args.model,
+        "adapter": str(args.adapter) if args.adapter else None,
         "device": args.device,
         "limit": args.limit,
         "gallery_size": len(split.gallery_paths),
@@ -56,6 +57,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--model", default=CLIP_MODEL)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--adapter",
+        type=Path,
+        default=None,
+        help="LoRA adapter folder saved by visual_search.train",
+    )
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--limit", type=int, help="use only the first N images (smoke runs)")
