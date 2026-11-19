@@ -7,7 +7,9 @@ dependencies = [
     "numpy",
     "pillow",
     "torch",
+    "torchvision",
     "transformers",
+    "peft",
     "faiss-cpu",
 ]
 

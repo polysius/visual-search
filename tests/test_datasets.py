@@ -1,4 +1,4 @@
-from visual_search.datasets import load_inshop, load_sop
+from visual_search.datasets import load_inshop, load_sop, load_sop_training
 
 
 def test_load_sop_uses_test_set_as_query_and_gallery(tmp_path):
@@ -14,6 +14,23 @@ def test_load_sop_uses_test_set_as_query_and_gallery(tmp_path):
     assert split.gallery_labels.tolist() == [11, 11, 12]
     assert split.query_gallery_ids.tolist() == [0, 1, 2]
     assert split.gallery_paths[2] == root / "cup_final/121_0.JPG"
+
+
+def test_load_sop_training_holds_out_whole_classes(tmp_path):
+    root = tmp_path / "Stanford_Online_Products"
+    root.mkdir()
+    rows = [f"{i} {i // 2} 1 bike_final/{i}.JPG" for i in range(20)]  # 10 classes of 2 images
+    (root / "Ebay_train.txt").write_text(
+        "image_id class_id super_class_id path\n" + "\n".join(rows)
+    )
+
+    data = load_sop_training(tmp_path, validation_classes=3)
+
+    validation_classes = set(data.validation.gallery_labels.tolist())
+    assert len(validation_classes) == 3
+    assert validation_classes.isdisjoint(data.train_labels.tolist())
+    assert len(data.train_paths) + len(data.validation.gallery_paths) == 20
+    assert data.validation.query_gallery_ids.tolist() == list(range(6))
 
 
 def test_load_inshop_separates_query_and_gallery(tmp_path):
