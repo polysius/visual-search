@@ -60,7 +60,7 @@ python -m visual_search.run_baseline --dataset sop-val --data-dir ~/vs-data --de
     --crop artifacts/boxes_val.json --crop-strategy top
 ```
 
-`scripts/sweep_crop.ps1` compares several crop settings on the validation classes. Cropping is off unless `--crop` is given.
+`scripts/sweep_crop.ps1` compares several crop settings on the validation classes. Cropping is off unless `--crop` is given, and it works with the SOP datasets only.
 
 Training holds out 1,000 whole classes of the SOP train split for validation and writes `best`, `last` and `log.json` to the output folder. The test split is only used by the second command.
 
