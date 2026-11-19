@@ -12,7 +12,7 @@ query image -> [YOLO crop] -> vision encoder (CLIP or DINOv2, LoRA fine-tuned) -
 
 | Milestone | Scope | State |
 | --- | --- | --- |
-| M1 | Baseline retrieval: pretrained embeddings, FAISS, recall@1/5/10 and mAP | Code and tests done. Not yet run on real images, see `RESULTS.md` |
+| M1 | Baseline retrieval: pretrained embeddings, FAISS, recall@1/5/10 and mAP | Done. Baseline numbers for CLIP and DINOv2 small are in `RESULTS.md` |
 | M2 | LoRA contrastive fine-tuning | Not started |
 | M3 | YOLO crop before embedding | Not started |
 | M4 | ONNX export, FastAPI upload endpoint, latency table | Not started |
