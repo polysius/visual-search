@@ -9,6 +9,10 @@ Usage:
 Everything runs at batch size 1, which is what one upload looks like. Each timing
 does warm-up runs first, then many timed runs, and reports the median (p50) and the
 95th percentile (p95) in milliseconds.
+
+Add `--skip-torch` on a machine that is short of memory. It drops the torch CPU and
+GPU rows, which need two more copies of the model, and keeps the rows for the served
+path: preprocessing, the ONNX forward pass, the FAISS search and the HTTP request.
 """
 
 import argparse
@@ -51,18 +55,17 @@ def main() -> None:
     args = parse_args()
     import faiss
     import onnxruntime
-    import torch
     from PIL import Image
 
-    from visual_search.embedder import ImageEmbedder, pooled_embedding
     from visual_search.index import GalleryIndex
     from visual_search.onnx_embedder import OnnxEmbedder
     from visual_search.preprocess import preprocess
     from visual_search.serve import decode_upload
 
     onnx_embedder = OnnxEmbedder(args.onnx)
-    torch_cpu = ImageEmbedder(onnx_embedder.model_name, "cpu", args.adapter)
-    torch_gpu = ImageEmbedder(onnx_embedder.model_name, "cuda", args.adapter)
+    torch_rows = (
+        None if args.skip_torch else make_torch_rows(onnx_embedder.model_name, args.adapter)
+    )
     gallery_index = GalleryIndex.load(args.gallery_dir / "index.faiss")
     dim = onnx_embedder.session.get_outputs()[0].shape[1]
     query_vector = np.random.default_rng(0).standard_normal((1, dim)).astype(np.float32)
@@ -70,25 +73,14 @@ def main() -> None:
     def stage_functions(data: bytes) -> dict:
         """The functions to time for one uploaded photo, each taking no arguments."""
         pixels = preprocess(decode_upload(data), onnx_embedder.config)[None]
-        tensor = torch.from_numpy(pixels)
-
-        def torch_forward(embedder, device):
-            def run():
-                with torch.no_grad():
-                    vectors = pooled_embedding(embedder.model, embedder.is_clip, tensor.to(device))
-                return vectors.cpu().numpy()  # copying to the CPU also waits for the GPU
-
-            return run
-
         return {
             "decode_and_preprocess": lambda: preprocess(decode_upload(data), onnx_embedder.config),
-            "forward_torch_cpu": torch_forward(torch_cpu, "cpu"),
-            "forward_torch_gpu": torch_forward(torch_gpu, "cuda"),
+            **({} if torch_rows is None else torch_rows(pixels)),
             "forward_onnx_cpu": lambda: onnx_embedder.session.run(None, {"pixel_values": pixels}),
             "faiss_search_k10": lambda: gallery_index.search(query_vector, 10),
         }
 
-    results = {"environment": environment(torch, onnxruntime, faiss), "images": {}}
+    results = {"environment": environment(onnxruntime, faiss, args.skip_torch), "images": {}}
     for label, path in (("typical", args.typical_image), ("large", args.large_image)):
         data = Path(path).read_bytes()
         results["images"][label] = {
@@ -107,6 +99,36 @@ def main() -> None:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(results, indent=2) + "\n")
+
+
+def make_torch_rows(model_name: str, adapter: Path | None):
+    """Load the model in torch on the CPU and the GPU; return a function that builds the rows.
+
+    This is the memory-heavy part of the benchmark, so `--skip-torch` leaves it out, and
+    torch is not even imported.
+    """
+    import torch
+
+    from visual_search.embedder import ImageEmbedder, pooled_embedding
+
+    embedders = {device: ImageEmbedder(model_name, device, adapter) for device in ("cpu", "cuda")}
+
+    def rows(pixels: np.ndarray) -> dict:
+        tensor = torch.from_numpy(pixels)
+
+        def forward(device: str):
+            embedder = embedders[device]
+
+            def run():
+                with torch.no_grad():
+                    vectors = pooled_embedding(embedder.model, embedder.is_clip, tensor.to(device))
+                return vectors.cpu().numpy()  # copying to the CPU also waits for the GPU
+
+            return run
+
+        return {"forward_torch_cpu": forward("cpu"), "forward_torch_gpu": forward("cuda")}
+
+    return rows
 
 
 def http_request_times(args, data: bytes, runs: int) -> list[float]:
@@ -162,24 +184,28 @@ def wait_until_healthy(client, server: subprocess.Popen) -> None:
     raise TimeoutError("the server did not become healthy in time")
 
 
-def environment(torch, onnxruntime, faiss) -> dict:
+def environment(onnxruntime, faiss, skip_torch: bool) -> dict:
     import fastapi
     import PIL
     import uvicorn
 
-    return {
+    details = {
         "cpu": platform.processor(),
         "logical_cores": os.cpu_count(),
-        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
-        "torch_threads": torch.get_num_threads(),
         "python": platform.python_version(),
-        "torch": torch.__version__,
         "onnxruntime": onnxruntime.__version__,
         "faiss": faiss.__version__ if hasattr(faiss, "__version__") else None,
         "pillow": PIL.__version__,
         "fastapi": fastapi.__version__,
         "uvicorn": uvicorn.__version__,
     }
+    if not skip_torch:  # without --skip-torch, torch is already imported, so this costs nothing
+        import torch
+
+        details["gpu"] = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+        details["torch_threads"] = torch.get_num_threads()
+        details["torch"] = torch.__version__
+    return details
 
 
 def parse_args() -> argparse.Namespace:
@@ -187,6 +213,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--onnx", type=Path, required=True)
     parser.add_argument(
         "--adapter", type=Path, default=None, help="LoRA adapter, for the torch rows"
+    )
+    parser.add_argument(
+        "--skip-torch",
+        action="store_true",
+        help="leave out the torch CPU and GPU rows, which load two more copies of the model",
     )
     parser.add_argument("--gallery-dir", type=Path, required=True)
     parser.add_argument("--typical-image", type=Path, required=True)

@@ -8,16 +8,17 @@ Pipeline:
 query image -> [optional YOLO crop] -> vision encoder (CLIP, LoRA fine-tuned, as ONNX) -> L2 normalise -> FAISS flat index -> ranked gallery
 ```
 
-The YOLO crop is off by default because it did not help on SOP, and the API does not use it. DINOv2 is supported for baselines and training but has not been fine-tuned or served.
+The YOLO crop is off by default because it did not help on SOP, and the API does not use it. The encoder can be CLIP or DINOv2 small. CLIP is more accurate and is the one used in the examples below. DINOv2 small is a quarter of the size and keeps most of the accuracy, see `RESULTS.md`.
 
 ## Status
 
 | Milestone | Scope | State |
 | --- | --- | --- |
 | M1 | Baseline retrieval: pretrained embeddings, FAISS, recall@1/5/10 and mAP | Done. Baseline numbers for CLIP and DINOv2 small are in `RESULTS.md` |
-| M2 | LoRA contrastive fine-tuning | Done for CLIP: recall@1 0.604 to 0.831 on the SOP test split, see `RESULTS.md`. DINOv2 not yet fine-tuned |
+| M2 | LoRA contrastive fine-tuning | Done for CLIP: recall@1 0.604 to 0.831 on the SOP test split, see `RESULTS.md`. DINOv2 is covered in M5 |
 | M3 | YOLO crop before embedding | Built and measured. No crop setting beat full images on recall@1 or mAP on SOP validation, so it is off by default, see `RESULTS.md` |
 | M4 | ONNX export, FastAPI upload endpoint, latency table | Done. About 50 to 70 ms per request for a typical photo on CPU, see `RESULTS.md` |
+| M5 | Fine-tune and serve DINOv2 | Done. DINOv2 small reaches recall@1 0.809 on the SOP test split against CLIP's 0.831, with a quarter of the parameters, see `RESULTS.md` |
 
 ## Dataset
 
@@ -74,7 +75,9 @@ python -m visual_search.serve --onnx artifacts/onnx/clip_lora.onnx --gallery-dir
 curl -F file=@photo.jpg "http://127.0.0.1:8000/search?k=5"
 ```
 
-`run_baseline --onnx artifacts/onnx/clip_lora.onnx` scores the ONNX model with the same metrics, on the CPU. `scripts/benchmark_latency.py` produces the latency table, and `scripts/smoke_check_server.py` queries a running server and checks its upload limits. Both scripts need the `dev` extra (`pip install -e .[dev]`), and the benchmark also needs a CUDA build of torch. The server refuses uploads over 10 MB, images over 64 million pixels and images more than 100 times longer than wide, and it will not load a gallery that was embedded with different fine-tuned weights than the ONNX model. The server binds to 127.0.0.1 and does no authentication or rate limiting. A query that is itself a gallery image matches itself at rank 1, which says nothing about retrieval quality. The ONNX file is 352 MB and stays out of git, like every file under `artifacts/`.
+To use DINOv2 small instead, pass `--model facebook/dinov2-small` to `train`, `export` and `build_index`, give each its own output path, and start the server with the matching `--onnx` and `--gallery-dir`. The server will not load a gallery built for another model.
+
+`run_baseline --onnx artifacts/onnx/clip_lora.onnx` scores the ONNX model with the same metrics, on the CPU. `scripts/benchmark_latency.py` produces the latency table (add `--skip-torch` on a machine short of memory), and `scripts/smoke_check_server.py` queries a running server and checks its upload limits. Both scripts need the `dev` extra (`pip install -e .[dev]`), and the benchmark also needs a CUDA build of torch unless you pass `--skip-torch`. The server refuses uploads over 10 MB, images over 64 million pixels and images more than 100 times longer than wide, and it will not load a gallery that was embedded with different fine-tuned weights than the ONNX model. The server binds to 127.0.0.1 and does no authentication or rate limiting. A query that is itself a gallery image matches itself at rank 1, which says nothing about retrieval quality. The ONNX files are 352 MB for CLIP and 87 MB for DINOv2 small, and stay out of git, like every file under `artifacts/`.
 
 Training holds out 1,000 whole classes of the SOP train split for validation and writes `best`, `last` and `log.json` to the output folder. The test split is only used by the second command.
 

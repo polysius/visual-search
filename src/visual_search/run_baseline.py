@@ -52,7 +52,8 @@ def main() -> None:
     )
     result = {
         "dataset": args.dataset,
-        "model": args.model,
+        # An ONNX file knows which model it came from, and --model is ignored for it.
+        "model": embedder.model_name if args.onnx else args.model,
         "adapter": str(args.adapter) if args.adapter else None,
         "onnx": str(args.onnx) if args.onnx else None,
         "crop": crop_settings(args),
