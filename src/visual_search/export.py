@@ -41,12 +41,34 @@ class _EmbeddingModule(torch.nn.Module):
         return pooled_embedding(self.model, self.is_clip, pixel_values)
 
 
+def fix_position_embeddings(model, crop_size: int) -> None:
+    """Compute DINOv2's position embeddings for the fixed input size once, up front.
+
+    DINOv2 was trained on 518 pixel images, so its transformers implementation resizes the
+    stored position embeddings to the input size on every forward pass. The exported graph
+    always gets the same crop_size input, so that resize gives the same result every time,
+    yet in the ONNX graph it was half of the run time (62 of 123 ms on the CPU). This replaces
+    it with the precomputed result. A model whose top level has no `embeddings` object with such
+    a method is left alone. CLIP is one: its embeddings sit one level down, in `vision_model`,
+    and its position embeddings are not resized unless the caller asks for it.
+    """
+    embeddings = getattr(model, "embeddings", None)
+    if not hasattr(embeddings, "interpolate_pos_encoding"):
+        return
+    patches = (crop_size // model.config.patch_size) ** 2
+    placeholder = torch.zeros(1, patches + 1, model.config.hidden_size)  # +1 for the CLS token
+    with torch.no_grad():
+        fixed = embeddings.interpolate_pos_encoding(placeholder, crop_size, crop_size)
+    embeddings.interpolate_pos_encoding = lambda embeddings, height, width: fixed
+
+
 def export_onnx(model_name: str, adapter_path: Path | None, out_path: Path) -> float:
     """Export the model, check it against torch, and return the largest output difference."""
     embedder = ImageEmbedder(model_name, device="cpu", adapter_path=adapter_path)
     config = PreprocessConfig.from_processor(
         model_name, embedder.processor, adapter_fingerprint(adapter_path)
     )
+    fix_position_embeddings(embedder.model, config.crop_size)
     module = _EmbeddingModule(embedder.model, embedder.is_clip).eval()
     example = torch.randn(2, 3, config.crop_size, config.crop_size)
 
