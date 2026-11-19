@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "httpx"]
+dev = ["pytest", "ruff", "httpx", "psutil"]
 # ONNX export and the API. ONNX Runtime here is the CPU build.
 serve = ["onnx", "onnxscript", "onnxruntime", "fastapi", "uvicorn", "python-multipart"]
 # Only the detector step needs this. Ultralytics is AGPL-licensed, so it stays out of the core install.
