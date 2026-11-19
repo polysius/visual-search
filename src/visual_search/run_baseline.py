@@ -10,22 +10,31 @@ import json
 import time
 from pathlib import Path
 
-from visual_search.datasets import LOADERS
+from visual_search.crop import STRATEGIES, BoxCropper
+from visual_search.datasets import LOADERS, SOP_ROOT
 from visual_search.embedder import CLIP_MODEL, ImageEmbedder
 from visual_search.evaluate import evaluate_retrieval
 
 
 def main() -> None:
     args = parse_args()
+    if args.crop is not None and args.dataset == "inshop":
+        raise SystemExit("--crop works with the SOP datasets only (sop, sop-val)")
     split = LOADERS[args.dataset](args.data_dir, limit=args.limit)
     embedder = ImageEmbedder(args.model, device=args.device, adapter_path=args.adapter)
 
+    crop = make_cropper(args)
+
     started = time.perf_counter()
-    gallery_embeddings = embedder.encode_paths(split.gallery_paths, args.batch_size, args.workers)
+    gallery_embeddings = embedder.encode_paths(
+        split.gallery_paths, args.batch_size, args.workers, crop
+    )
     if split.query_gallery_ids is not None:
         query_embeddings = gallery_embeddings  # queries are gallery images; embed once
     else:
-        query_embeddings = embedder.encode_paths(split.query_paths, args.batch_size, args.workers)
+        query_embeddings = embedder.encode_paths(
+            split.query_paths, args.batch_size, args.workers, crop
+        )
     embed_seconds = time.perf_counter() - started
 
     report = evaluate_retrieval(
@@ -39,6 +48,7 @@ def main() -> None:
         "dataset": args.dataset,
         "model": args.model,
         "adapter": str(args.adapter) if args.adapter else None,
+        "crop": crop_settings(args),
         "device": args.device,
         "limit": args.limit,
         "gallery_size": len(split.gallery_paths),
@@ -49,6 +59,32 @@ def main() -> None:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(result, indent=2) + "\n")
+
+
+def crop_settings(args: argparse.Namespace) -> dict | None:
+    if args.crop is None:
+        return None
+    return {
+        "boxes": str(args.crop),
+        "strategy": args.crop_strategy,
+        "min_confidence": args.crop_min_confidence,
+        "margin": args.crop_margin,
+        "min_area_fraction": args.crop_min_area,
+    }
+
+
+def make_cropper(args: argparse.Namespace) -> BoxCropper | None:
+    settings = crop_settings(args)
+    if settings is None:
+        return None
+    return BoxCropper.from_file(
+        args.crop,
+        root=args.data_dir / SOP_ROOT,
+        strategy=settings["strategy"],
+        min_confidence=settings["min_confidence"],
+        margin=settings["margin"],
+        min_area_fraction=settings["min_area_fraction"],
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,6 +98,18 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="LoRA adapter folder saved by visual_search.train",
+    )
+    parser.add_argument(
+        "--crop",
+        type=Path,
+        default=None,
+        help="boxes saved by visual_search.detect; crop each image to its object before embedding",
+    )
+    parser.add_argument("--crop-strategy", choices=STRATEGIES, default="top")
+    parser.add_argument("--crop-min-confidence", type=float, default=0.25)
+    parser.add_argument("--crop-margin", type=float, default=0.1)
+    parser.add_argument(
+        "--crop-min-area", type=float, default=0.1, help="smaller boxes keep the full image"
     )
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=4)

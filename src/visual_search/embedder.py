@@ -5,6 +5,7 @@ projections are plain `nn.Linear` layers, which LoRA (M2) and ONNX export (M4)
 both handle well, so baseline, fine-tuned and exported models share this wrapper.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -60,11 +61,18 @@ class ImageEmbedder:
         return vectors.cpu().numpy().astype(np.float32)
 
     def encode_paths(
-        self, paths: list[Path], batch_size: int = 64, num_workers: int = 4
+        self,
+        paths: list[Path],
+        batch_size: int = 64,
+        num_workers: int = 4,
+        crop: Callable[[Path, Image.Image], Image.Image] | None = None,
     ) -> np.ndarray:
-        """Embed image files. Decoding runs in worker processes while the model runs."""
+        """Embed image files. Decoding runs in worker processes while the model runs.
+
+        `crop(path, image)` can return a cropped image, such as `BoxCropper`; it runs in the workers.
+        """
         loader = self._torch.utils.data.DataLoader(
-            _ImageFiles(paths),
+            _ImageFiles(paths, crop),
             batch_size=batch_size,
             num_workers=num_workers,
             collate_fn=list,  # keep PIL images; the processor does the resizing
@@ -74,11 +82,13 @@ class ImageEmbedder:
 
 
 class _ImageFiles:
-    def __init__(self, paths: list[Path]):
+    def __init__(self, paths: list[Path], crop: Callable | None = None):
         self.paths = paths
+        self.crop = crop
 
     def __len__(self) -> int:
         return len(self.paths)
 
     def __getitem__(self, index: int) -> Image.Image:
-        return Image.open(self.paths[index]).convert("RGB")
+        image = Image.open(self.paths[index]).convert("RGB")
+        return image if self.crop is None else self.crop(self.paths[index], image)

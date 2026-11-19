@@ -62,7 +62,7 @@ def main() -> None:
     if args.images_per_class < 2:
         raise SystemExit("--images-per-class must be at least 2, or no image has a positive pair")
     seed_everything(args.seed)
-    data = load_sop_training(args.data_dir, args.validation_classes, args.seed)
+    data = load_sop_training(args.data_dir)
     embedder = ImageEmbedder(args.model, device=args.device)
     add_lora(embedder, args.rank)
 
@@ -192,7 +192,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--temperature", type=float, default=0.05)
     parser.add_argument("--rank", type=int, default=16)
-    parser.add_argument("--validation-classes", type=int, default=1000)
     parser.add_argument("--eval-batch-size", type=int, default=128)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
