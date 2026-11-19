@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch or pull request makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Pinned so that a new ruff release cannot fail the build on code that did not change.
+      # Change the version here when you upgrade ruff locally.
+      - run: pip install ruff==0.17.5
+      - run: ruff check src tests scripts
+      - run: ruff format --check src tests scripts
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest Python the project supports (requires-python in pyproject.toml), and a recent one.
+        python-version: ["3.10", "3.13"]
+    env:
+      # No test downloads a model. With this set, one that tries to fails instead of
+      # quietly depending on the network.
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # The default torch wheel for Linux bundles gigabytes of CUDA libraries. The tests run on
+      # the CPU, so install the CPU build first; pip then sees torch as already satisfied.
+      - run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+      # The serve extra is needed so that the API, ONNX and export tests run instead of being skipped.
+      - run: pip install -e ".[dev,serve]"
+      - run: pytest -q

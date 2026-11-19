@@ -47,6 +47,8 @@ pytest
 
 `--limit N` embeds only the first N images, for a quick smoke run.
 
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check` and `pytest` on every push to `main` and every pull request. The tests run on Python 3.10 and 3.13 with the CPU build of torch, and they need no model downloads or GPU. To run the same checks locally, install with `pip install -e .[dev,serve]` and run `ruff check src tests scripts`, `ruff format --check src tests scripts` and `pytest`.
+
 Fine-tune with LoRA, then score the best epoch on the test split:
 
 ```
