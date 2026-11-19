@@ -18,6 +18,8 @@ from visual_search.evaluate import evaluate_retrieval
 
 def main() -> None:
     args = parse_args()
+    if args.crop is not None and args.dataset == "inshop":
+        raise SystemExit("--crop works with the SOP datasets only (sop, sop-val)")
     split = LOADERS[args.dataset](args.data_dir, limit=args.limit)
     embedder = ImageEmbedder(args.model, device=args.device, adapter_path=args.adapter)
 

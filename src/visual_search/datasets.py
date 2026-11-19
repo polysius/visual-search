@@ -92,8 +92,8 @@ def load_sop_training(
 def load_sop_validation(data_dir: Path, limit: int | None = None) -> RetrievalSplit:
     """The classes held out of training in M2, used to choose settings without the test split.
 
-    It uses the same class count and seed as `visual_search.train`, so a model trained
-    there has never seen these classes. `limit` keeps the first N images.
+    `visual_search.train` always holds out these same classes (the defaults of
+    `load_sop_training`), so a model trained there has never seen them. `limit` keeps the first N images.
     """
     validation = load_sop_training(data_dir).validation
     if limit is None:
